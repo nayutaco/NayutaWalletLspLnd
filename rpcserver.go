@@ -2092,6 +2092,7 @@ func (r *rpcServer) parseOpenChannelReq(in *lnrpc.OpenChannelRequest,
 		MaxHtlcs:         maxHtlcs,
 		MaxLocalCsv:      uint16(in.MaxLocalCsv),
 		ChannelType:      channelType,
+		ZeroConf:         in.ZeroConf,
 	}, nil
 }
 

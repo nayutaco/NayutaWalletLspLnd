@@ -203,6 +203,10 @@ type ChannelLink interface {
 		amtToForward lnwire.MilliSatoshi,
 		incomingTimeout, outgoingTimeout uint32,
 		heightNow uint32, scid lnwire.ShortChannelID) *LinkError
+	CheckHtlcForwardWithoutFee(payHash [32]byte, incomingAmt lnwire.MilliSatoshi,
+		amtToForward lnwire.MilliSatoshi,
+		incomingTimeout, outgoingTimeout uint32,
+		heightNow uint32, scid lnwire.ShortChannelID) *LinkError
 
 	// CheckHtlcTransit should return a nil error if the passed HTLC details
 	// satisfy the current channel policy.  Otherwise, a LinkError with a
@@ -327,7 +331,7 @@ type InterceptedForward interface {
 	// Resume notifies the intention to resume an existing hold forward. This
 	// basically means the caller wants to resume with the default behavior for
 	// this htlc which usually means forward it.
-	Resume() error
+	Resume(lnwire.MilliSatoshi, lnwire.ShortChannelID, [lnwire.OnionPacketSize]byte) error
 
 	// Settle notifies the intention to settle an existing hold
 	// forward with a given preimage.

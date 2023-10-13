@@ -334,7 +334,9 @@ func openChannel(ctx *cli.Context) error {
 	channelType := ctx.String("channel_type")
 	switch channelType {
 	case "":
-		break
+		if ctx.Bool("zero_conf") {
+			return fmt.Errorf("\tINFO: if you fail open_channel, you will need \"channel_type\" option")
+		}
 	case channelTypeTweakless:
 		req.CommitmentType = lnrpc.CommitmentType_STATIC_REMOTE_KEY
 	case channelTypeAnchors:

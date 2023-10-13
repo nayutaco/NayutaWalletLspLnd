@@ -104,6 +104,10 @@ type FwdResolution struct {
 	// FailureCode is the failure code that is to be passed back to the
 	// sender if action is FwdActionFail.
 	FailureCode lnwire.FailCode
+
+	OutgoingAmountMsat      uint64
+	OutgoingRequestedChanID uint64
+	OnionBlob               []byte
 }
 
 type fwdResolution struct {
@@ -239,7 +243,7 @@ func (s *InterceptableSwitch) setInterceptor(interceptor ForwardInterceptor) {
 	log.Infof("Interceptor disconnected, resolving held packets")
 
 	for _, fwd := range s.holdForwards {
-		if err := fwd.Resume(); err != nil {
+		if err := fwd.Resume(fwd.Packet().OutgoingAmount, fwd.Packet().OutgoingChanID, fwd.Packet().OnionBlob); err != nil {
 			log.Errorf("Failed to resume hold forward %v", err)
 		}
 	}
@@ -255,7 +259,9 @@ func (s *InterceptableSwitch) resolve(res *FwdResolution) error {
 
 	switch res.Action {
 	case FwdActionResume:
-		return intercepted.Resume()
+		var onionBlob [lnwire.OnionPacketSize]byte
+		copy(onionBlob[:], res.OnionBlob)
+		return intercepted.Resume(lnwire.MilliSatoshi(res.OutgoingAmountMsat), lnwire.NewShortChanIDFromInt(res.OutgoingRequestedChanID), onionBlob)
 
 	case FwdActionSettle:
 		return intercepted.Settle(res.Preimage)
@@ -484,7 +490,13 @@ func (f *interceptedForward) Packet() InterceptedPacket {
 }
 
 // Resume resumes the default behavior as if the packet was not intercepted.
-func (f *interceptedForward) Resume() error {
+func (f *interceptedForward) Resume(outgoingAmount lnwire.MilliSatoshi, outgoingChanID lnwire.ShortChannelID, onionBlob [lnwire.OnionPacketSize]byte) error {
+	f.htlc.OnionBlob = onionBlob
+	f.htlc.Amount = outgoingAmount
+	f.packet.htlc = f.htlc
+	f.packet.amount = outgoingAmount
+	f.packet.outgoingChanID = outgoingChanID
+
 	// Forward to the switch. A link quit channel isn't needed, because we
 	// are on a different thread now.
 	return f.htlcSwitch.ForwardPackets(nil, f.packet)

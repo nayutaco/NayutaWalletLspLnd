@@ -811,6 +811,12 @@ func (f *mockChannelLink) CheckHtlcForward([32]byte, lnwire.MilliSatoshi,
 
 	return f.checkHtlcForwardResult
 }
+func (f *mockChannelLink) CheckHtlcForwardWithoutFee([32]byte, lnwire.MilliSatoshi,
+	lnwire.MilliSatoshi, uint32, uint32, uint32,
+	lnwire.ShortChannelID) *LinkError {
+
+	return f.checkHtlcForwardResult
+}
 
 func (f *mockChannelLink) CheckHtlcTransit(payHash [32]byte,
 	amt lnwire.MilliSatoshi, timeout uint32,

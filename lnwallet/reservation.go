@@ -559,7 +559,7 @@ func (r *ChannelReservation) validateReserveBounds() bool {
 		maxDustLimit = theirDustLimit
 	}
 
-	return minChanReserve >= maxDustLimit
+	return minChanReserve == 0 || minChanReserve >= maxDustLimit
 }
 
 // OurContribution returns the wallet's fully populated contribution to the

@@ -150,6 +150,8 @@ type reservationWithCtx struct {
 	// channelType is the explicit channel type proposed by the initiator of
 	// the channel.
 	channelType *lnwire.ChannelType
+	zeroConf    bool
+	private     bool
 
 	updateMtx   sync.RWMutex
 	lastUpdated time.Time
@@ -248,6 +250,7 @@ type InitFundingMsg struct {
 	// funding negotiation. This type will only be observed if BOTH sides
 	// support explicit channel type negotiation.
 	ChannelType *lnwire.ChannelType
+	ZeroConf    bool
 
 	// Updates is a channel which updates to the opening status of the channel
 	// are sent on.
@@ -1421,6 +1424,13 @@ func (f *Manager) handleFundingOpen(peer lnpeer.Peer,
 	// Sending the option-scid-alias channel type for a public channel is
 	// disallowed.
 	public := msg.ChannelFlags&lnwire.FFAnnounceChannel != 0
+	if zeroConf || !public {
+		// Nayuta
+		err = fmt.Errorf("handleFundingOpen: zero-conf or private channel not allowed: zeroConf=%v, public=%v", zeroConf, public)
+		log.Error(err)
+		f.failFundingFlow(peer, msg.PendingChannelID, err)
+		return
+	}
 	if public && scid {
 		err = fmt.Errorf("option-scid-alias chantype for public " +
 			"channel")
@@ -1834,6 +1844,11 @@ func (f *Manager) handleFundingAccept(peer lnpeer.Peer,
 	chanReserve := f.cfg.RequiredRemoteChanReserve(
 		resCtx.chanAmt, resCtx.reservation.OurContribution().DustLimit,
 	)
+	if resCtx.zeroConf || resCtx.private {
+		// NayutaHub
+		log.Debugf("handleFundingAccept chanReserve=0: zeroConf=%v, private=%v", resCtx.zeroConf, resCtx.private)
+		chanReserve = 0
+	}
 
 	// The remote node has responded with their portion of the channel
 	// contribution. At this point, we can process their contribution which
@@ -3998,6 +4013,8 @@ func (f *Manager) handleInitFundingMsg(msg *InitFundingMsg) {
 		remoteMaxHtlcs: maxHtlcs,
 		maxLocalCsv:    maxCSV,
 		channelType:    msg.ChannelType,
+		zeroConf:       msg.ZeroConf,
+		private:        msg.Private,
 		reservation:    reservation,
 		peer:           msg.Peer,
 		updates:        msg.Updates,
@@ -4023,6 +4040,12 @@ func (f *Manager) handleInitFundingMsg(msg *InitFundingMsg) {
 	// policy to determine of required commitment constraints for the
 	// remote party.
 	chanReserve := f.cfg.RequiredRemoteChanReserve(capacity, ourDustLimit)
+	if msg.ZeroConf || msg.Private {
+		// NayutaHub
+		log.Debugf("handleInitFundingMsg chanReserve=0: ZeroConf=%v, Private=%v", msg.ZeroConf, msg.Private)
+		chanReserve = 0
+	}
+	log.Infof("handleInitFundingMsg: ZeroConf:%v, chanReserve:%v", msg.ZeroConf, chanReserve)
 
 	// When opening a script enforced channel lease, include the required
 	// expiry TLV record in our proposal.

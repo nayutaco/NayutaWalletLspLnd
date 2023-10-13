@@ -2548,6 +2548,68 @@ func (l *channelLink) CheckHtlcForward(payHash [32]byte,
 	return nil
 }
 
+// CheckHtlcForwardWithoutFee is zero-fee version CheckHtlcForward().
+func (l *channelLink) CheckHtlcForwardWithoutFee(payHash [32]byte,
+	incomingHtlcAmt, amtToForward lnwire.MilliSatoshi,
+	incomingTimeout, outgoingTimeout uint32,
+	heightNow uint32, originalScid lnwire.ShortChannelID) *LinkError {
+
+	l.RLock()
+	policy := l.cfg.FwrdingPolicy
+	l.RUnlock()
+
+	// First check whether the outgoing htlc satisfies the channel policy.
+	err := l.canSendHtlc(
+		policy, payHash, amtToForward, outgoingTimeout, heightNow,
+		originalScid,
+	)
+	if err != nil {
+		return err
+	}
+
+	// If the actual fee is less than our expected fee, then we'll reject
+	// this HTLC as it didn't provide a sufficient amount of fees, or the
+	// values have been tampered with, or the send used incorrect/dated
+	// information to construct the forwarding information for this hop. In
+	// any case, we'll cancel this HTLC.
+	if incomingHtlcAmt != amtToForward {
+		l.log.Warnf("outgoing htlc(%x) has not same amount: "+
+			"incoming %v, forward %v",
+			payHash[:], incomingHtlcAmt, amtToForward)
+
+		// As part of the returned error, we'll send our latest routing
+		// policy so the sending node obtains the most up to date data.
+		cb := func(upd *lnwire.ChannelUpdate) lnwire.FailureMessage {
+			return lnwire.NewFeeInsufficient(amtToForward, *upd)
+		}
+		failure := l.createFailureWithUpdate(false, originalScid, cb)
+		return NewLinkError(failure)
+	}
+
+	// Finally, we'll ensure that the time-lock on the outgoing HTLC meets
+	// the following constraint: the incoming time-lock minus our time-lock
+	// delta should equal the outgoing time lock. Otherwise, whether the
+	// sender messed up, or an intermediate node tampered with the HTLC.
+	timeDelta := policy.TimeLockDelta
+	if incomingTimeout < outgoingTimeout+timeDelta {
+		l.log.Warnf("incoming htlc(%x) has incorrect time-lock value: "+
+			"expected at least %v block delta, got %v block delta",
+			payHash[:], timeDelta, incomingTimeout-outgoingTimeout)
+
+		// Grab the latest routing policy so the sending node is up to
+		// date with our current policy.
+		cb := func(upd *lnwire.ChannelUpdate) lnwire.FailureMessage {
+			return lnwire.NewIncorrectCltvExpiry(
+				incomingTimeout, *upd,
+			)
+		}
+		failure := l.createFailureWithUpdate(false, originalScid, cb)
+		return NewLinkError(failure)
+	}
+
+	return nil
+}
+
 // CheckHtlcTransit should return a nil error if the passed HTLC details
 // satisfy the current channel policy.  Otherwise, a LinkError with a
 // valid protocol failure message should be returned in order to signal

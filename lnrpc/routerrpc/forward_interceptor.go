@@ -109,8 +109,11 @@ func (r *forwardInterceptor) resolveFromClient(
 	switch in.Action {
 	case ResolveHoldForwardAction_RESUME:
 		return r.htlcSwitch.Resolve(&htlcswitch.FwdResolution{
-			Key:    circuitKey,
-			Action: htlcswitch.FwdActionResume,
+			Key:                     circuitKey,
+			Action:                  htlcswitch.FwdActionResume,
+			OutgoingAmountMsat:      in.OutgoingAmountMsat,
+			OutgoingRequestedChanID: in.OutgoingRequestedChanId,
+			OnionBlob:               in.OnionBlob,
 		})
 
 	case ResolveHoldForwardAction_FAIL:

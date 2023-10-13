@@ -1128,7 +1128,7 @@ func (s *Switch) handlePacketForward(packet *htlcPacket) error {
 			s.indexMtx.RUnlock()
 
 			log.Debugf("unable to find link with "+
-				"destination %v", packet.outgoingChanID)
+				"destination %v, err=%v", packet.outgoingChanID, err)
 
 			// If packet was forwarded from another channel link
 			// than we should notify this link that some error
@@ -1167,12 +1167,37 @@ func (s *Switch) handlePacketForward(packet *htlcPacket) error {
 				// current forwarding conditions of this target
 				// link.
 				currentHeight := atomic.LoadUint32(&s.bestHeight)
-				failure = link.CheckHtlcForward(
-					htlc.PaymentHash, packet.incomingAmount,
-					packet.amount, packet.incomingTimeout,
-					packet.outgoingTimeout, currentHeight,
-					packet.originalOutgoingChanID,
-				)
+
+				s.indexMtx.RLock()
+				incomingLink, err := s.getLinkByShortID(packet.incomingChanID)
+				outgoingLink, err2 := s.getLinkByShortID(packet.outgoingChanID)
+				s.indexMtx.RUnlock()
+				if err != nil || err2 != nil {
+					// If we couldn't find the incoming link, we can't
+					// evaluate the incoming's exposure to dust, so we just
+					// fail the HTLC back.
+					linkErr := NewLinkError(
+						&lnwire.FailTemporaryChannelFailure{},
+					)
+
+					return s.failAddPacket(packet, linkErr)
+				}
+				if incomingLink.Peer().PubKey() == outgoingLink.Peer().PubKey() {
+					log.Infof("zero-fee forwarding for rebalance")
+					failure = link.CheckHtlcForwardWithoutFee(
+						htlc.PaymentHash, packet.incomingAmount,
+						packet.amount, packet.incomingTimeout,
+						packet.outgoingTimeout, currentHeight,
+						packet.originalOutgoingChanID,
+					)
+				} else {
+					failure = link.CheckHtlcForward(
+						htlc.PaymentHash, packet.incomingAmount,
+						packet.amount, packet.incomingTimeout,
+						packet.outgoingTimeout, currentHeight,
+						packet.originalOutgoingChanID,
+					)
+				}
 			}
 
 			// If this link can forward the htlc, add it to the set
@@ -1220,14 +1245,16 @@ func (s *Switch) handlePacketForward(packet *htlcPacket) error {
 		// this htlc. The reason for randomization is to evenly
 		// distribute the htlc load without making assumptions about
 		// what the best channel is.
-		destination := destinations[rand.Intn(len(destinations))] // nolint:gosec
+		// destination := destinations[rand.Intn(len(destinations))] // nolint:gosec
+		var destination ChannelLink
 
 		// Retrieve the incoming link by its ShortChannelID. Note that
 		// the incomingChanID is never set to hop.Source here.
 		s.indexMtx.RLock()
 		incomingLink, err := s.getLinkByShortID(packet.incomingChanID)
+		outgoingLink, err2 := s.getLinkByShortID(packet.outgoingChanID)
 		s.indexMtx.RUnlock()
-		if err != nil {
+		if err != nil || err2 != nil {
 			// If we couldn't find the incoming link, we can't
 			// evaluate the incoming's exposure to dust, so we just
 			// fail the HTLC back.
@@ -1236,6 +1263,18 @@ func (s *Switch) handlePacketForward(packet *htlcPacket) error {
 			)
 
 			return s.failAddPacket(packet, linkErr)
+		}
+
+		if incomingLink.Peer().PubKey() != outgoingLink.Peer().PubKey() {
+			destination = destinations[rand.Intn(len(destinations))] // nolint:gosec
+		} else {
+			log.Infof("strict forwarding for rebalance")
+			for i, v := range destinations {
+				if packet.outgoingChanID == v.ShortChanID() {
+					destination = destinations[i]
+					break
+				}
+			}
 		}
 
 		// Evaluate whether this HTLC would increase our exposure to
